@@ -796,20 +796,36 @@ pub extern "C" fn burn() {
 
     let caller = utils::get_verified_caller().unwrap_or_revert();
 
-    // Revert if caller is not token_owner. This seems to be the only check we need to do.
     let token_owner = match utils::get_dictionary_value_from_key::<Key>(
         TOKEN_OWNERS,
         &token_identifier.get_dictionary_item_key(),
     ) {
-        Some(token_owner_key) => {
-            if token_owner_key != caller {
-                runtime::revert(NFTCoreError::InvalidTokenOwner)
-            }
-            token_owner_key
-        }
+        Some(token_owner_key) => token_owner_key,
         None => runtime::revert(NFTCoreError::MissingOwnerTokenIdentifierKey),
     };
 
+    // Check if caller is owner
+    let is_owner = token_owner == caller;
+
+    // Check if caller is approved to execute transfer
+    let is_approved = match utils::get_dictionary_value_from_key::<Option<Key>>(
+        APPROVED,
+        &token_identifier.get_dictionary_item_key(),
+    ) {
+        Some(Some(maybe_approved)) => caller == maybe_approved,
+        Some(None) | None => false,
+    };
+
+    let owner_operator_item_key = utils::encode_key_and_value(&token_owner, &caller);
+
+    let is_operator = !is_approved
+        && utils::get_dictionary_value_from_key::<bool>(OPERATORS, &owner_operator_item_key)
+            .unwrap_or_default();
+
+    // Revert if caller is not owner nor approved
+    if !is_owner && !is_approved && !is_operator {
+        runtime::revert(NFTCoreError::InvalidTokenOwner);
+    }
     // It makes sense to keep this token as owned by the caller. It just happens that the caller
     // owns a burnt token. That's all. Similarly, we should probably also not change the
     // owned_tokens dictionary.
